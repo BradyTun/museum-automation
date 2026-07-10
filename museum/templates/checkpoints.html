@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6">
+  <div class="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+    Each checkpoint has an IR sensor that reports when the car has stopped. There are 3 checkpoints on the tour route.
+  </div>
+  <div id="checkpoints-grid" class="grid grid-cols-1 gap-4 md:grid-cols-3"></div>
+</div>
+{% endblock %}

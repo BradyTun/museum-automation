@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6">
+
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+    <!-- Video feed -->
+    <div class="rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
+      <div class="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+        <h2 class="text-lg font-semibold text-slate-900">Live camera feed</h2>
+        <span class="text-sm text-slate-400">from ESP32 CAM</span>
+      </div>
+      <div class="p-5">
+        <div class="overflow-hidden rounded-lg bg-slate-900">
+          <img id="video-feed" alt="Live feed" class="hidden aspect-video w-full object-cover" />
+          <div id="video-placeholder" class="flex aspect-video w-full items-center justify-center text-center text-base text-slate-400">
+            No live video yet. Add the ESP32 CAM stream URL below.
+          </div>
+        </div>
+        <div class="mt-4">
+          <label for="video-url-input" class="text-sm font-medium text-slate-500">Video feed URL</label>
+          <div class="mt-1 flex flex-col gap-2 sm:flex-row">
+            <input id="video-url-input" type="text" placeholder="http://192.168.x.x:81/stream"
+                   class="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-base focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100" />
+            <button id="video-url-save"
+                    class="rounded-lg bg-brand-600 px-5 py-2.5 text-base font-semibold text-white shadow-sm transition hover:bg-brand-700">Save URL</button>
+          </div>
+          <p id="video-url-note" class="mt-2 text-sm text-slate-400">Paste the ESP32 CAM stream URL, then Save.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Robot status -->
+    <div class="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div class="border-b border-slate-100 px-5 py-4">
+        <h2 class="text-lg font-semibold text-slate-900">Robot status</h2>
+      </div>
+      <div class="space-y-4 p-5 text-base">
+        <div class="flex items-center justify-between">
+          <span class="text-slate-500">State</span>
+          <span id="robot-state"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-500">At checkpoint</span>
+          <span id="robot-cp" class="font-medium text-slate-900">None</span>
+        </div>
+        <div class="rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
+          When the car stops at a checkpoint, the info below loads on its own so staff can read it aloud.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Read aloud panel -->
+  <div class="rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div class="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <h2 class="text-lg font-semibold text-slate-900">Item information (read aloud)</h2>
+      <div class="flex flex-wrap items-center gap-2">
+        <select id="cp-select" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"></select>
+        <button id="load-content-btn" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Load</button>
+      </div>
+    </div>
+
+    <div class="p-5">
+      <div class="mb-4 flex flex-wrap items-center gap-3">
+        <button id="read-btn" class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-5 py-2.5 text-base font-semibold text-white shadow-sm transition hover:bg-brand-700">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" /></svg>
+          Read aloud
+        </button>
+        <button id="stop-btn" class="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-5 py-2.5 text-base font-semibold text-slate-600 hover:bg-slate-50">Stop</button>
+        <div class="flex items-center gap-2 text-sm text-slate-500">
+          <label for="rate">Speed</label>
+          <input id="rate" type="range" min="0.6" max="1.4" step="0.1" value="1" class="accent-brand-600" />
+        </div>
+        <select id="voice" class="max-w-[220px] rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-600 focus:outline-none"></select>
+      </div>
+
+      <div class="rounded-lg border border-slate-100 bg-slate-50 p-6">
+        <div class="flex items-center justify-between">
+          <h3 id="item-title" class="text-2xl font-bold text-slate-900">No item loaded</h3>
+          <span id="item-source" class="text-sm text-slate-400"></span>
+        </div>
+        <p id="item-text" class="mt-3 text-lg leading-relaxed text-slate-700">Load a checkpoint to see the item information here.</p>
+      </div>
+
+      <div class="mt-4 flex flex-col gap-2 sm:flex-row">
+        <input id="qr-url" type="text" placeholder="Paste a QR link to a .txt file" class="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100" />
+        <button id="scan-btn" class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Fetch from link</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

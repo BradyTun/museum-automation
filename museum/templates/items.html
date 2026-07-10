@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6">
+  <div class="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+    Edit the text that the staff app reads aloud. The link points to the .txt file stored in each checkpoint QR code.
+  </div>
+
+  <div class="rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-100 text-sm">
+        <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="px-5 py-3">Checkpoint</th>
+            <th class="px-5 py-3">Title</th>
+            <th class="px-5 py-3">Text link</th>
+            <th class="px-5 py-3">Summary</th>
+            <th class="px-5 py-3 text-right">Save</th>
+          </tr>
+        </thead>
+        <tbody id="items-body" class="divide-y divide-slate-100"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
