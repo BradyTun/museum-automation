@@ -1,0 +1,7 @@
+# Full local development dependencies.
+# Install with:  pip install -r requirements-local.txt
+-r requirements.txt
+
+# Server-side QR decoding from a camera image.
+# Large native wheel, kept out of the Vercel build; the app runs fine without it.
+opencv-python-headless>=4.9

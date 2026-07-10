@@ -10,9 +10,15 @@ basedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", "sqlite:///" + os.path.join(basedir, "museum.db")
+    # On Vercel the app runs on a read-only filesystem, so the SQLite file
+    # must live in the writable /tmp directory. Data there is temporary and
+    # resets on cold starts, which is fine for a demo deployment.
+    _default_sqlite = (
+        "sqlite:////tmp/museum.db"
+        if os.environ.get("VERCEL")
+        else "sqlite:///" + os.path.join(basedir, "museum.db")
     )
+    SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", _default_sqlite)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Google SMTP settings

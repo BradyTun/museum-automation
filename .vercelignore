@@ -1,0 +1,14 @@
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.db
+*.sqlite3
+.env
+.env.example
+.git/
+.gitignore
+_*.txt
+Museum_Automation_System_Overview.md
+requirements-local.txt
