@@ -51,14 +51,14 @@
     </div>
   </div>
 
-  <!-- Read aloud panel -->
+  <!-- Exhibit read aloud panel -->
   <div class="rounded-xl border border-slate-200 bg-white shadow-sm">
     <div class="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <h2 class="text-lg font-semibold text-slate-900">Item information (read aloud)</h2>
-      <div class="flex flex-wrap items-center gap-2">
-        <select id="cp-select" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"></select>
-        <button id="load-content-btn" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Load</button>
+      <div class="flex flex-wrap items-center gap-3">
+        <h2 class="text-lg font-semibold text-slate-900">Exhibit information</h2>
+        <span id="cp-badge"></span>
       </div>
+      <button id="sim-btn" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Simulate checkpoint</button>
     </div>
 
     <div class="p-5">
@@ -76,17 +76,21 @@
       </div>
 
       <div class="rounded-lg border border-slate-100 bg-slate-50 p-6">
-        <div class="flex items-center justify-between">
-          <h3 id="item-title" class="text-2xl font-bold text-slate-900">No item loaded</h3>
-          <span id="item-source" class="text-sm text-slate-400"></span>
+        <div class="flex flex-col gap-5 sm:flex-row">
+          <img id="exhibit-img" src="{{ url_for('static', filename='img/exhibit.jpg') }}" alt="Exhibit portrait"
+               class="h-44 w-44 shrink-0 rounded-lg object-cover ring-1 ring-slate-200"
+               onerror="this.style.display='none'" />
+          <div class="min-w-0">
+            <div class="flex items-start justify-between gap-3">
+              <h3 id="item-title" class="text-2xl font-bold text-brand-700">Loading exhibit...</h3>
+              <span id="item-source" class="shrink-0 text-sm text-slate-400"></span>
+            </div>
+            <p id="item-text" class="mt-3 text-lg leading-relaxed text-slate-700"></p>
+          </div>
         </div>
-        <p id="item-text" class="mt-3 text-lg leading-relaxed text-slate-700">Load a checkpoint to see the item information here.</p>
       </div>
 
-      <div class="mt-4 flex flex-col gap-2 sm:flex-row">
-        <input id="qr-url" type="text" placeholder="Paste a QR link to a .txt file" class="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100" />
-        <button id="scan-btn" class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Fetch from link</button>
-      </div>
+      <p class="mt-3 text-sm text-slate-400">When the checkpoint sensor detects the car, the exhibit is read aloud on its own.</p>
     </div>
   </div>
 

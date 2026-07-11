@@ -16,6 +16,23 @@ from ..services.qr_service import decode_qr, fetch_text
 
 api_bp = Blueprint("api", __name__)
 
+HARDCODED_EXHIBIT = {
+    "title": "Min Don Min (မင်းတုန်းမင်း)",
+    "text": (
+        "Name: Mindon Min, birth name Maung Lwin. "
+        "Reign: 1853 to 1878. "
+        "Title: King of the Konbaung Dynasty. "
+        "Lifespan: July 8, 1808 to October 1, 1878. "
+        "Predecessor: Pagan Min. "
+        "Successor: Thibaw Min. "
+        "During his reign, King Mindon ruled independent Myanmar from 1853 to 1878. "
+        "After the Second Anglo Burmese War, he focused on modernization and diplomacy. "
+        "He founded Mandalay in 1857, hosted the Fifth Buddhist Council in 1871, "
+        "carved the Buddhist canon on 729 marble slabs, introduced Myanmar's first "
+        "machine minted coins, built a telegraph network, and modernized salary and tax systems."
+    ),
+}
+
 
 def _to_float(value):
     try:
@@ -39,6 +56,23 @@ def _get_robot():
         db.session.add(robot)
         db.session.commit()
     return robot
+
+
+def _get_or_create_primary_checkpoint():
+    """Return the single checkpoint used by the simplified tour flow."""
+    checkpoint = Checkpoint.query.order_by(Checkpoint.order_index).first()
+    if checkpoint:
+        return checkpoint
+
+    checkpoint = Checkpoint(
+        name="Main Checkpoint",
+        order_index=1,
+        qr_link="",
+        is_stopped=False,
+    )
+    db.session.add(checkpoint)
+    db.session.commit()
+    return checkpoint
 
 
 def _create_alert(alert_type, message):
@@ -154,6 +188,46 @@ def checkpoint_status(cp_id):
     return jsonify(ok=True, checkpoint=checkpoint.to_dict(), robot=robot.to_dict())
 
 
+@api_bp.get("/checkpoint/status")
+def single_checkpoint_status_get():
+    """Read single checkpoint status for a one sensor setup."""
+    checkpoint = _get_or_create_primary_checkpoint()
+    return jsonify(ok=True, checkpoint=checkpoint.to_dict(), detected=checkpoint.is_stopped)
+
+
+@api_bp.post("/checkpoint/status")
+def single_checkpoint_status_post():
+    """Set single checkpoint status for a one IR sensor setup.
+
+    Payload: {"detected": true|false} or {"is_stopped": true|false}
+    """
+    checkpoint = _get_or_create_primary_checkpoint()
+    data = request.get_json(silent=True) or request.form.to_dict()
+    is_stopped = _to_bool(data.get("detected", data.get("is_stopped")))
+
+    checkpoint.is_stopped = is_stopped
+    robot = _get_robot()
+
+    if is_stopped:
+        checkpoint.last_stopped_at = datetime.utcnow()
+        db.session.add(CheckpointEvent(checkpoint_id=checkpoint.id, event="stopped"))
+        robot.state = "stopped"
+        robot.current_checkpoint_id = checkpoint.id
+    else:
+        db.session.add(CheckpointEvent(checkpoint_id=checkpoint.id, event="left"))
+        robot.state = "following"
+        if robot.current_checkpoint_id == checkpoint.id:
+            robot.current_checkpoint_id = None
+
+    db.session.commit()
+    return jsonify(
+        ok=True,
+        detected=checkpoint.is_stopped,
+        checkpoint=checkpoint.to_dict(),
+        robot=robot.to_dict(),
+    )
+
+
 @api_bp.get("/robot/status")
 def robot_status_get():
     return jsonify(robot=_get_robot().to_dict())
@@ -243,3 +317,9 @@ def qr_scan():
 
     text = fetch_text(content) if str(content).startswith("http") else content
     return jsonify(ok=True, content=content, text=text or "")
+
+
+@api_bp.get("/tour/script")
+def tour_script():
+    """Return hardcoded exhibit content for one checkpoint mode."""
+    return jsonify(ok=True, source="hardcoded", **HARDCODED_EXHIBIT)

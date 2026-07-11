@@ -295,56 +295,31 @@ window.resolveAlert = async (id) => {
 };
 
 // ---------- page: robot ----------
-let lastLoadedCheckpoint = null;
+let tourScript = { title: "", text: "" };
+let lastDetected = false;
 
-async function loadCheckpointContent(cpId) {
-  if (!cpId) return;
-  const data = await getJSON(`/api/items/checkpoint/${cpId}/content`);
-  if (data.ok) {
-    el("item-title").textContent = data.title || "";
-    el("item-text").textContent = data.text || "";
-    el("item-source").textContent = "source: " + data.source;
-  }
-}
-
-async function scanQr() {
-  const url = el("qr-url").value.trim();
-  if (!url) return;
-  const data = await postJSON("/api/qr/scan", { content: url });
-  if (data.ok) {
-    el("item-title").textContent = "Scanned item";
-    el("item-text").textContent = data.text || data.content;
-    el("item-source").textContent = "source: qr link";
-  }
+function speakTourScript() {
+  Speech.speak((tourScript.title || "") + ". " + (tourScript.text || ""), {
+    rate: parseFloat(el("rate")?.value || "1"),
+    voiceName: el("voice")?.value,
+  });
 }
 
 async function initRobot() {
-  const select = el("cp-select");
+  // Load the hardcoded exhibit script once.
   try {
-    const cps = (await getJSON("/api/checkpoints")).checkpoints;
-    if (select) {
-      select.innerHTML = cps
-        .map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)
-        .join("");
-    }
+    tourScript = await getJSON("/api/tour/script");
+    el("item-title").textContent = tourScript.title || "";
+    el("item-text").textContent = tourScript.text || "";
+    el("item-source").textContent = "hardcoded script";
   } catch (e) {
     setConn(false);
   }
 
-  el("load-content-btn")?.addEventListener("click", () =>
-    loadCheckpointContent(select.value)
-  );
-  el("read-btn")?.addEventListener("click", () => {
-    const title = el("item-title").textContent;
-    const text = el("item-text").textContent;
-    Speech.speak(title + ". " + text, {
-      rate: parseFloat(el("rate")?.value || "1"),
-      voiceName: el("voice")?.value,
-    });
-  });
+  el("read-btn")?.addEventListener("click", speakTourScript);
   el("stop-btn")?.addEventListener("click", () => Speech.stop());
-  el("scan-btn")?.addEventListener("click", scanQr);
 
+  // Camera stream URL is view only.
   el("video-url-save")?.addEventListener("click", async () => {
     const input = el("video-url-input");
     const note = el("video-url-note");
@@ -370,22 +345,35 @@ async function initRobot() {
     setConn(false);
   }
 
+  // Demo helper: toggle the single checkpoint sensor by hand.
+  el("sim-btn")?.addEventListener("click", async () => {
+    const current = await getJSON("/api/checkpoint/status");
+    await postJSON("/api/checkpoint/status", { detected: !current.detected });
+  });
+
   registerPoll(async () => {
     const robot = (await getJSON("/api/robot/status")).robot;
     el("robot-state").innerHTML = stateBadge(robot.state);
-    el("robot-cp").textContent = robot.current_checkpoint ? robot.current_checkpoint.name : "None";
     setVideo("video-feed", "video-placeholder", robot.video_url);
 
-    if (
-      robot.state === "stopped" &&
-      robot.current_checkpoint_id &&
-      lastLoadedCheckpoint !== robot.current_checkpoint_id
-    ) {
-      lastLoadedCheckpoint = robot.current_checkpoint_id;
-      if (select) select.value = robot.current_checkpoint_id;
-      loadCheckpointContent(robot.current_checkpoint_id);
+    const cp = await getJSON("/api/checkpoint/status");
+    const name = cp.checkpoint ? cp.checkpoint.name : "Checkpoint";
+    el("robot-cp").textContent = cp.detected ? name : "None";
+    if (el("cp-badge")) {
+      el("cp-badge").innerHTML = cp.detected
+        ? badge("Checkpoint detected", "warn")
+        : badge("Waiting for car", "muted");
     }
-  }, 3000);
+    if (el("sim-btn")) {
+      el("sim-btn").textContent = cp.detected ? "Clear checkpoint" : "Simulate checkpoint";
+    }
+
+    // Rising edge: the car just arrived, so read the exhibit aloud.
+    if (cp.detected && !lastDetected) {
+      speakTourScript();
+    }
+    lastDetected = cp.detected;
+  }, 2000);
 }
 
 // ---------- page: checkpoints ----------

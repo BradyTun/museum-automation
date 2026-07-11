@@ -17,14 +17,52 @@ The system helps visitors learn about historical items while improving museum sa
 
 ```mermaid
 flowchart TD
-    Robot[Line Follower Robot] -->|Live video feed| Server[Backend API Server]
-    Security[Security System] -->|Sensor data| Server
-    Security -->|Google SMTP email alerts| StaffEmail[Staff Email Inbox]
-    Checkpoints[3 Checkpoint IR Sensors] -->|Stop status| Server
+    subgraph ROBOT["Robot Car"]
+        Nano["Arduino Nano<br/>line following and checkpoints"]
+        Cam["ESP32 CAM<br/>MJPEG video"]
+    end
 
-    Server --> Dashboard[Staff Dashboard]
-    Server --> StaffApp[Staff App]
-    StaffApp --> Audio[Read aloud item information]
+    subgraph SEC["Security Node"]
+        SecMCU["ESP32 Security<br/>motion, smoke, temp, humidity"]
+        Buzzer["Buzzer"]
+    end
+
+    subgraph CP["Checkpoint Sensors"]
+        CP1["Checkpoint 1 IR"]
+        CP2["Checkpoint 2 IR"]
+        CP3["Checkpoint 3 IR"]
+    end
+
+    subgraph CLOUD["Server on Vercel"]
+        API["Flask REST API"]
+        DB[("SQLite database")]
+        QR["QR decode and text fetch"]
+    end
+
+    subgraph STAFF["Staff Side"]
+        Dash["Staff Dashboard"]
+        App["Staff App voice"]
+        Mail["Staff Email Inbox"]
+    end
+
+    Cam -->|"WiFi HTTP MJPEG"| API
+    Nano -->|"WiFi HTTP JSON status"| API
+    SecMCU -->|"WiFi HTTP JSON readings"| API
+    SecMCU -->|"on motion or smoke"| Buzzer
+    SecMCU -->|"Google SMTP"| Mail
+    CP1 & CP2 & CP3 -->|"stop status"| API
+
+    API <--> DB
+    API --> QR
+    QR -->|"historical text"| App
+    API -->|"live data poll"| Dash
+    API -->|"item info"| App
+    App --> Audio["Read aloud to visitors"]
+
+    classDef brand fill:#fdf2f9,stroke:#c2158a,color:#4a0730;
+    classDef cloud fill:#fce7f4,stroke:#9d1069,color:#4a0730;
+    class Nano,Cam,SecMCU,Buzzer,CP1,CP2,CP3,Dash,App,Mail,Audio brand;
+    class API,DB,QR cloud;
 ```
 
 ## Robot Hardware
@@ -48,40 +86,98 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    IRL[IR Line Sensor Left] --> Nano[Arduino Nano]
-    IRR[IR Line Sensor Right] --> Nano
-    IRC[IR Checkpoint Sensor] --> Nano
+    subgraph POWER["Power"]
+        PB["Power Bank 5V"]
+        BAT["3 x 3.7V Li-ion<br/>about 11.1V"]
+    end
 
-    Nano --> Driver[L298N Motor Driver]
-    Driver --> Motors[DC Motors]
+    subgraph CONTROL["Control"]
+        Nano["Arduino Nano"]
+        L298["L298N Motor Driver"]
+    end
 
-    Batt[3 x 3.7V Battery] --> Driver
-    Driver -->|5V output| Nano
+    subgraph SENSORS["IR Sensors"]
+        IRL["Line Sensor Left"]
+        IRR["Line Sensor Right"]
+        IRC["Checkpoint Sensor"]
+    end
 
-    PowerBank[Power Bank] --> ESP[ESP32 CAM AI Thinker]
-    ESP -->|Video stream| Server[Backend Server]
+    subgraph DRIVE["Drive"]
+        M1["Motor Left"]
+        M2["Motor Right"]
+    end
+
+    IRL -->|"D2 digital in"| Nano
+    IRR -->|"D3 digital in"| Nano
+    IRC -->|"D4 digital in"| Nano
+
+    Nano -->|"D5 ENA PWM"| L298
+    Nano -->|"D6 ENB PWM"| L298
+    Nano -->|"D7 D8 IN1 IN2"| L298
+    Nano -->|"D9 D10 IN3 IN4"| L298
+
+    BAT -->|"12V motor supply"| L298
+    L298 -->|"5V regulator to Vin"| Nano
+    L298 --> M1
+    L298 --> M2
+
+    PB -->|"5V USB"| ESP["ESP32 CAM"]
+    ESP -->|"WiFi MJPEG"| Server["Backend Server"]
+
+    classDef brand fill:#fdf2f9,stroke:#c2158a,color:#4a0730;
+    class PB,BAT,Nano,L298,IRL,IRR,IRC,M1,M2,ESP,Server brand;
 ```
 
 ## Robot Behavior
 
 ```mermaid
 flowchart TD
-    A[Start] --> B[Follow line]
-    B --> C{Checkpoint detected}
+    A(["Power on"]) --> B["Read 2 line sensors"]
+    B --> C{"On the line?"}
+    C -->|"Both on line"| D["Drive straight, equal PWM"]
+    C -->|"Left sensor off"| E["Steer right"]
+    C -->|"Right sensor off"| F["Steer left"]
+    C -->|"Both off"| G["Line lost, slow and search"]
+    D --> H{"Checkpoint IR triggered?"}
+    E --> H
+    F --> H
+    G --> B
 
-    C -- No --> B
-    C -- Yes --> D[Stop at checkpoint]
+    H -->|"No"| B
+    H -->|"Yes"| I["Stop motors"]
+    I --> J["POST stop status to server"]
+    J --> K["ESP32 CAM holds frame"]
+    K --> L{"QR decoded by server?"}
+    L -->|"No, retry"| K
+    L -->|"Yes"| M["Server fetches text file"]
+    M --> N["Staff app reads aloud"]
+    N --> O["Wait dwell time"]
+    O --> P["POST leaving status"]
+    P --> B
 
-    D --> E[Capture camera frame]
-    E --> F{QR found}
+    classDef brand fill:#fdf2f9,stroke:#c2158a,color:#4a0730;
+    class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P brand;
+```
 
-    F -- No --> E
-    F -- Yes --> G[Read QR link]
+## Robot State Machine
 
-    G --> H[Fetch historical text file]
-    H --> I[Staff app reads aloud]
-    I --> J[Continue to next checkpoint]
-    J --> B
+The robot moves through clear states during a tour.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Following: start button
+    Following --> Correcting: line drifts
+    Correcting --> Following: back on line
+    Following --> Searching: line lost
+    Searching --> Following: line found
+    Following --> Stopped: checkpoint IR high
+    Stopped --> Scanning: hold camera frame
+    Scanning --> Explaining: QR decoded
+    Explaining --> Following: dwell time done
+    Stopped --> Following: no QR after retries
+    Following --> Idle: stop button
+    Idle --> [*]
 ```
 
 ## Security System
@@ -98,15 +194,54 @@ The security system reports to the same server.
 
 ```mermaid
 flowchart LR
-    Motion[Motion Sensor] --> Ctrl[ESP32 Security Controller]
-    Smoke[Smoke Sensor] --> Ctrl
-    Temp[Temperature Sensor] --> Ctrl
-    Humid[Humidity Sensor] --> Ctrl
+    subgraph NODE["ESP32 Security Node"]
+        PIR["PIR Motion"]
+        MQ["MQ Smoke and Gas"]
+        DHT["DHT Temp and Humidity"]
+        Logic["Firmware logic<br/>threshold checks"]
+    end
 
-    Ctrl -->|Motion or smoke alert| Buzzer[Buzzer]
-    Ctrl -->|Google SMTP email alert| Email[Staff Email Inbox]
-    Ctrl -->|Data and events| Server[Backend API Server]
-    Server --> Dashboard[Staff Dashboard]
+    PIR --> Logic
+    MQ --> Logic
+    DHT --> Logic
+
+    Logic -->|"motion or smoke"| BZ["Buzzer on"]
+    Logic -->|"motion or smoke"| SMTP["Google SMTP email"]
+    Logic -->|"every few seconds"| API["Flask API<br/>POST reading"]
+
+    API --> DB[("Readings and Alerts")]
+    API -->|"temp over limit or humidity over limit"| ALERT["Create alert"]
+    API --> DASH["Dashboard live cards"]
+    SMTP --> INBOX["Staff Email"]
+
+    classDef brand fill:#fdf2f9,stroke:#c2158a,color:#4a0730;
+    classDef cloud fill:#fce7f4,stroke:#9d1069,color:#4a0730;
+    class PIR,MQ,DHT,Logic,BZ,SMTP,INBOX,DASH brand;
+    class API,DB,ALERT cloud;
+```
+
+### Security Alert Timing
+
+When motion or smoke is found, three things happen at almost the same time.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Sen as Sensors
+    participant E as ESP32 Security
+    participant A as Flask API
+    participant M as Staff Email
+    participant D as Dashboard
+
+    Sen->>E: Motion or smoke signal
+    par Local alarm
+        E->>E: Turn on buzzer
+    and Notify staff
+        E->>M: Google SMTP email alert
+    and Report to server
+        E->>A: POST reading with alert flag
+        A->>D: Show new alert card
+    end
 ```
 
 ## Server Features
@@ -124,18 +259,126 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-    participant Car as Robot Car
-    participant Cam as ESP32 CAM
-    participant API as Backend API
-    participant App as Staff App
+    autonumber
+    participant N as Arduino Nano
+    participant IR as Checkpoint IR
+    participant C as ESP32 CAM
+    participant A as Flask API
+    participant D as Staff Dashboard
+    participant S as Staff App
 
-    Car->>Car: Follow line
-    Car->>Car: Stop at checkpoint
-    Cam->>API: Send video frame
-    API->>API: Decode QR and get text link
-    API->>API: Fetch historical text
-    API->>App: Send item information
-    App->>App: Read aloud to visitors
+    loop Line following
+        N->>N: Read line sensors and steer
+    end
+
+    IR-->>N: Checkpoint detected
+    N->>N: Stop motors
+    N->>A: POST checkpoint stop status
+    A->>D: Show robot stopped
+
+    C->>A: Stream MJPEG frame
+    A->>A: Decode QR from frame
+
+    alt QR found
+        A->>A: Fetch text file from link
+        A->>S: Send item title and text
+        S->>S: Read aloud to visitors
+    else QR not found
+        A->>C: Ask for another frame
+    end
+
+    N->>A: POST leaving status
+    A->>D: Show robot moving
+```
+
+## Data Model
+
+The server stores checkpoints, items, sensor readings, alerts, and robot status.
+
+```mermaid
+erDiagram
+    CHECKPOINT ||--o| HISTORICAL_ITEM : has
+    CHECKPOINT ||--o{ CHECKPOINT_EVENT : logs
+    ROBOT_STATUS }o--|| CHECKPOINT : "points to"
+    SECURITY_READING ||--o{ ALERT : "can trigger"
+
+    CHECKPOINT {
+        int id
+        string name
+        int order_index
+        string qr_link
+        bool is_stopped
+        datetime last_stopped_at
+    }
+    HISTORICAL_ITEM {
+        int id
+        int checkpoint_id
+        string title
+        text summary
+        string content_url
+    }
+    SECURITY_READING {
+        int id
+        float temperature
+        float humidity
+        bool motion
+        bool smoke
+        datetime created_at
+    }
+    ALERT {
+        int id
+        string alert_type
+        string message
+        bool is_resolved
+    }
+    ROBOT_STATUS {
+        int id
+        string state
+        int current_checkpoint_id
+        string video_url
+    }
+    CHECKPOINT_EVENT {
+        int id
+        int checkpoint_id
+        string event
+        datetime created_at
+    }
+```
+
+## Deployment View
+
+The devices talk to a Flask app hosted on Vercel over the local WiFi.
+
+```mermaid
+flowchart LR
+    subgraph FIELD["Museum Floor"]
+        Robot["Robot Car"]
+        SecNode["Security Node"]
+        Checkpoints["3 Checkpoints"]
+    end
+
+    subgraph NET["Local WiFi"]
+        Router["WiFi Router"]
+    end
+
+    subgraph VERCEL["Vercel Cloud"]
+        Fn["Flask app<br/>api/index.py"]
+        Store[("SQLite in /tmp")]
+    end
+
+    Browser["Staff Browser<br/>Dashboard and Voice"]
+
+    Robot --> Router
+    SecNode --> Router
+    Checkpoints --> Router
+    Router -->|"HTTPS"| Fn
+    Fn <--> Store
+    Browser -->|"HTTPS"| Fn
+
+    classDef brand fill:#fdf2f9,stroke:#c2158a,color:#4a0730;
+    classDef cloud fill:#fce7f4,stroke:#9d1069,color:#4a0730;
+    class Robot,SecNode,Checkpoints,Router,Browser brand;
+    class Fn,Store cloud;
 ```
 
 ## Notes
