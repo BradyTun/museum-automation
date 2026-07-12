@@ -20,13 +20,22 @@ const Speech = {
   },
 
   speak(text, options = {}) {
-    if (!this.synth || !text) return;
+    if (!this.synth || !text) {
+      if (typeof options.onEnd === "function") options.onEnd();
+      return;
+    }
     this.stop();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = options.rate || 1;
     if (options.voiceName) {
       const voice = this.voices.find((v) => v.name === options.voiceName);
       if (voice) utterance.voice = voice;
+    }
+    if (typeof options.onEnd === "function") {
+      utterance.onend = () => options.onEnd();
+    }
+    if (typeof options.onError === "function") {
+      utterance.onerror = () => options.onError();
     }
     this.synth.speak(utterance);
   },

@@ -389,17 +389,65 @@ let checkpointDetected = false;
 let serialPort = null;
 let serialReader = null;
 let serialKeepReading = false;
+const SERIAL_SPP_UUID = "00001101-0000-1000-8000-00805f9b34fb";
+let autoResetAfterSpeech = false;
+let autoResetTimer = null;
 
-function speakTourScript() {
-  Speech.speak((tourScript.title || "") + ". " + (tourScript.text || ""), {
-    rate: parseFloat(el("rate")?.value || "1"),
-    voiceName: el("voice")?.value,
+function clearAutoResetTimer() {
+  if (autoResetTimer) {
+    clearTimeout(autoResetTimer);
+    autoResetTimer = null;
+  }
+}
+
+function speakTourScript(options = {}) {
+  const rate = parseFloat(el("rate")?.value || "1");
+  const voiceName = el("voice")?.value;
+  const fullText = (tourScript.title || "") + ". " + (tourScript.text || "");
+  const autoReset = options.autoReset === true;
+
+  if (autoReset) {
+    autoResetAfterSpeech = true;
+    clearAutoResetTimer();
+
+    // Fallback in case a browser does not fire speech end callbacks.
+    const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
+    const estimatedMs = Math.max(
+      2500,
+      Math.round((wordCount / (2.6 * Math.max(rate, 0.6))) * 1000 + 1500)
+    );
+    autoResetTimer = setTimeout(() => {
+      if (autoResetAfterSpeech) {
+        autoResetAfterSpeech = false;
+        setCheckpointDetected(false);
+      }
+    }, estimatedMs);
+  }
+
+  const finalizeAutoReset = () => {
+    if (!autoResetAfterSpeech) return;
+    autoResetAfterSpeech = false;
+    clearAutoResetTimer();
+    setCheckpointDetected(false);
+  };
+
+  Speech.speak(fullText, {
+    rate,
+    voiceName,
+    onEnd: finalizeAutoReset,
+    onError: finalizeAutoReset,
   });
 }
 
-function setCheckpointDetected(on) {
+function setCheckpointDetected(on, options = {}) {
   if (on === checkpointDetected) return; // only act on a real change
   checkpointDetected = on;
+
+  if (!on) {
+    autoResetAfterSpeech = false;
+    clearAutoResetTimer();
+  }
+
   if (el("cp-badge")) {
     el("cp-badge").innerHTML = on
       ? badge("Checkpoint detected", "warn")
@@ -411,7 +459,7 @@ function setCheckpointDetected(on) {
   if (el("robot-cp")) {
     el("robot-cp").textContent = on ? "Main Checkpoint" : "None";
   }
-  if (on) speakTourScript();
+  if (on) speakTourScript({ autoReset: options.autoReset === true });
 }
 
 function handleSerialMessage(raw) {
@@ -419,7 +467,7 @@ function handleSerialMessage(raw) {
   if (!msg) return;
   if (el("serial-log")) el("serial-log").textContent = "Last message: " + msg;
   if (msg.includes("STOP")) {
-    setCheckpointDetected(true);
+    setCheckpointDetected(true, { autoReset: true });
   } else if (
     msg.includes("GO") ||
     msg.includes("START") ||
@@ -483,15 +531,55 @@ async function connectBluetoothSerial() {
     }
     return;
   }
+
+  const buildErrorHint = (err) => {
+    const msg = String((err && err.message) || err || "");
+    if (err && err.name === "NotFoundError") {
+      return {
+        status: "Not connected",
+        log: "No serial device was selected.",
+      };
+    }
+    if (/blocklist|bluetoothserviceclassid|0000110e/i.test(msg)) {
+      return {
+        status: "Blocked profile",
+        log:
+          "This device is blocked by Chrome Web Serial (service UUID 110e). Use a Bluetooth Serial module with SPP UUID 1101, like HC-05 or HC-06.",
+      };
+    }
+    return {
+      status: "Not connected",
+      log: "Could not connect to the serial port.",
+    };
+  };
+
   try {
-    serialPort = await navigator.serial.requestPort();
+    try {
+      // Request the classic Serial Port Profile first.
+      serialPort = await navigator.serial.requestPort({
+        allowedBluetoothServiceClassIds: [SERIAL_SPP_UUID],
+      });
+    } catch (requestErr) {
+      // Fallback for browsers that do not support this option yet.
+      if (requestErr instanceof TypeError) {
+        serialPort = await navigator.serial.requestPort();
+      } else {
+        throw requestErr;
+      }
+    }
+
     await serialPort.open({ baudRate: 9600 });
     serialKeepReading = true;
     setBluetoothStatus(true, "Bluetooth connected");
+    if (el("serial-log")) {
+      el("serial-log").textContent = "Listening for STOP at 9600 baud...";
+    }
     readSerialLoop();
   } catch (e) {
     serialPort = null;
-    setBluetoothStatus(false, "Not connected");
+    const hint = buildErrorHint(e);
+    setBluetoothStatus(false, hint.status);
+    if (el("serial-log")) el("serial-log").textContent = hint.log;
   }
 }
 
@@ -519,8 +607,11 @@ async function initRobot() {
     setConn(false);
   }
 
-  el("read-btn")?.addEventListener("click", speakTourScript);
-  el("stop-btn")?.addEventListener("click", () => Speech.stop());
+  el("read-btn")?.addEventListener("click", () => speakTourScript({ autoReset: false }));
+  el("stop-btn")?.addEventListener("click", () => {
+    Speech.stop();
+    if (checkpointDetected) setCheckpointDetected(false);
+  });
 
   // Camera stream URL is view only.
   el("video-url-save")?.addEventListener("click", async () => {
