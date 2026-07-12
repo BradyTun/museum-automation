@@ -19,17 +19,7 @@ api_bp = Blueprint("api", __name__)
 HARDCODED_EXHIBIT = {
     "title": "Min Don Min (မင်းတုန်းမင်း)",
     "text": (
-        "Name: Mindon Min, birth name Maung Lwin. "
-        "Reign: 1853 to 1878. "
-        "Title: King of the Konbaung Dynasty. "
-        "Lifespan: July 8, 1808 to October 1, 1878. "
-        "Predecessor: Pagan Min. "
-        "Successor: Thibaw Min. "
-        "During his reign, King Mindon ruled independent Myanmar from 1853 to 1878. "
-        "After the Second Anglo Burmese War, he focused on modernization and diplomacy. "
-        "He founded Mandalay in 1857, hosted the Fifth Buddhist Council in 1871, "
-        "carved the Buddhist canon on 729 marble slabs, introduced Myanmar's first "
-        "machine minted coins, built a telegraph network, and modernized salary and tax systems."
+        "King Mindon was one of Myanmar's most revered monarchs, best known for founding the royal city of Mandalay and hosting the Fifth Buddhist Council."
     ),
 }
 

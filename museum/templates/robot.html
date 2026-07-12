@@ -24,6 +24,8 @@
                    class="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-base focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100" />
             <button id="video-url-save"
                     class="rounded-lg bg-brand-600 px-5 py-2.5 text-base font-semibold text-white shadow-sm transition hover:bg-brand-700">Save URL</button>
+            <button id="video-reconnect"
+                    class="rounded-lg border border-slate-200 px-5 py-2.5 text-base font-semibold text-slate-600 hover:bg-slate-50">Reconnect</button>
           </div>
           <p id="video-url-note" class="mt-2 text-sm text-slate-400">Paste the ESP32 CAM stream URL, then Save.</p>
         </div>
@@ -58,7 +60,13 @@
         <h2 class="text-lg font-semibold text-slate-900">Exhibit information</h2>
         <span id="cp-badge"></span>
       </div>
-      <button id="sim-btn" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Simulate checkpoint</button>
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-1.5 text-sm text-slate-400">
+          <span id="bt-dot" class="h-2.5 w-2.5 rounded-full bg-slate-300"></span>
+          <span id="bt-text">Bluetooth off</span>
+        </span>
+        <button id="bt-btn" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">Connect Bluetooth</button>
+      </div>
     </div>
 
     <div class="p-5">
@@ -90,7 +98,11 @@
         </div>
       </div>
 
-      <p class="mt-3 text-sm text-slate-400">When the checkpoint sensor detects the car, the exhibit is read aloud on its own.</p>
+      <p class="mt-3 text-sm text-slate-400">
+        Connect the Bluetooth module, then the exhibit is read aloud on its own when a
+        <span class="font-semibold text-slate-500">STOP</span> message arrives at 9600 baud.
+        <span id="serial-log" class="mt-1 block text-slate-400 sm:ml-1 sm:inline"></span>
+      </p>
     </div>
   </div>
 

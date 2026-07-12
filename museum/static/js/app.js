@@ -120,18 +120,107 @@ function registerPoll(fn, interval) {
 }
 
 // ---------- shared renderers ----------
-function setVideo(imgId, placeholderId, url) {
+function createVideoStream(imgId, placeholderId) {
   const img = el(imgId);
   const placeholder = el(placeholderId);
-  if (!img || !placeholder) return;
-  if (url) {
-    if (img.getAttribute("src") !== url) img.src = url;
-    img.classList.remove("hidden");
-    placeholder.classList.add("hidden");
-  } else {
-    img.classList.add("hidden");
-    placeholder.classList.remove("hidden");
+  const defaultMsg = placeholder ? placeholder.textContent : "";
+  let baseUrl = "";
+  let watchdog = null;
+  let retry = null;
+  let stopping = false;
+
+  function clearTimers() {
+    if (watchdog) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+    if (retry) {
+      clearTimeout(retry);
+      retry = null;
+    }
   }
+  function showPlaceholder(msg) {
+    if (img) img.classList.add("hidden");
+    if (placeholder) {
+      placeholder.textContent = msg;
+      placeholder.classList.remove("hidden");
+    }
+  }
+  function showImage() {
+    if (placeholder) placeholder.classList.add("hidden");
+    if (img) img.classList.remove("hidden");
+  }
+  function connect() {
+    if (!img || !baseUrl) return;
+    clearTimers();
+    showPlaceholder("Connecting to camera...");
+    // A fresh query value forces a brand new connection and drops any
+    // stale one, so a black frame does not stay stuck forever.
+    const sep = baseUrl.includes("?") ? "&" : "?";
+    stopping = false;
+    img.src = baseUrl + sep + "cb=" + Date.now();
+    // If no first frame arrives in time, drop it and try again.
+    watchdog = setTimeout(connect, 8000);
+  }
+
+  if (img) {
+    img.addEventListener("load", () => {
+      clearTimers(); // first frame arrived, the stream is healthy
+      showImage();
+    });
+    img.addEventListener("error", () => {
+      if (stopping) {
+        stopping = false;
+        return;
+      }
+      clearTimers();
+      showPlaceholder("Reconnecting to camera...");
+      retry = setTimeout(connect, 1500);
+    });
+  }
+
+  // Release the camera connection while the tab is hidden, then resume.
+  document.addEventListener("visibilitychange", () => {
+    if (!baseUrl) return;
+    if (document.hidden) {
+      clearTimers();
+      stopping = true;
+      if (img) img.src = "";
+    } else {
+      connect();
+    }
+  });
+
+  return {
+    set(url) {
+      url = url || "";
+      if (url === baseUrl) return; // no change, keep the current stream
+      baseUrl = url;
+      if (!url) {
+        clearTimers();
+        stopping = true;
+        if (img) img.src = "";
+        showPlaceholder(defaultMsg);
+        return;
+      }
+      connect();
+    },
+    reconnect() {
+      if (baseUrl) connect();
+    },
+  };
+}
+
+const _videoStreams = {};
+
+function setVideo(imgId, placeholderId, url) {
+  let stream = _videoStreams[imgId];
+  if (!stream) {
+    stream = createVideoStream(imgId, placeholderId);
+    _videoStreams[imgId] = stream;
+  }
+  stream.set(url || "");
+  return stream;
 }
 
 function renderAlerts(tbody, alerts, withResolve) {
@@ -296,13 +385,127 @@ window.resolveAlert = async (id) => {
 
 // ---------- page: robot ----------
 let tourScript = { title: "", text: "" };
-let lastDetected = false;
+let checkpointDetected = false;
+let serialPort = null;
+let serialReader = null;
+let serialKeepReading = false;
 
 function speakTourScript() {
   Speech.speak((tourScript.title || "") + ". " + (tourScript.text || ""), {
     rate: parseFloat(el("rate")?.value || "1"),
     voiceName: el("voice")?.value,
   });
+}
+
+function setCheckpointDetected(on) {
+  if (on === checkpointDetected) return; // only act on a real change
+  checkpointDetected = on;
+  if (el("cp-badge")) {
+    el("cp-badge").innerHTML = on
+      ? badge("Checkpoint detected", "warn")
+      : badge("Waiting for car", "muted");
+  }
+  if (el("robot-state")) {
+    el("robot-state").innerHTML = stateBadge(on ? "stopped" : "following");
+  }
+  if (el("robot-cp")) {
+    el("robot-cp").textContent = on ? "Main Checkpoint" : "None";
+  }
+  if (on) speakTourScript();
+}
+
+function handleSerialMessage(raw) {
+  const msg = (raw || "").trim().toUpperCase();
+  if (!msg) return;
+  if (el("serial-log")) el("serial-log").textContent = "Last message: " + msg;
+  if (msg.includes("STOP")) {
+    setCheckpointDetected(true);
+  } else if (
+    msg.includes("GO") ||
+    msg.includes("START") ||
+    msg.includes("CLEAR") ||
+    msg.includes("RESUME")
+  ) {
+    setCheckpointDetected(false);
+  }
+}
+
+function setBluetoothStatus(connected, text) {
+  const dot = el("bt-dot");
+  if (dot) {
+    dot.className =
+      "h-2.5 w-2.5 rounded-full " + (connected ? "bg-emerald-500" : "bg-slate-300");
+  }
+  if (el("bt-text")) {
+    el("bt-text").textContent =
+      text || (connected ? "Bluetooth connected" : "Bluetooth off");
+  }
+  if (el("bt-btn")) el("bt-btn").textContent = connected ? "Disconnect" : "Connect Bluetooth";
+}
+
+async function readSerialLoop() {
+  const decoder = new TextDecoderStream();
+  serialPort.readable.pipeTo(decoder.writable).catch(() => {});
+  serialReader = decoder.readable.getReader();
+  let buffer = "";
+  try {
+    while (serialKeepReading) {
+      const { value, done } = await serialReader.read();
+      if (done) break;
+      buffer += value;
+      let idx;
+      while ((idx = buffer.search(/[\r\n]/)) >= 0) {
+        handleSerialMessage(buffer.slice(0, idx));
+        buffer = buffer.slice(idx + 1);
+      }
+      // Fast path in case the module sends STOP without a line break.
+      if (buffer.length > 80) buffer = buffer.slice(-80);
+      if (buffer.toUpperCase().includes("STOP")) {
+        handleSerialMessage("STOP");
+        buffer = "";
+      }
+    }
+  } catch (e) {
+    // read failed, most likely the device was disconnected
+  } finally {
+    try {
+      serialReader.releaseLock();
+    } catch (e) {}
+  }
+}
+
+async function connectBluetoothSerial() {
+  if (!("serial" in navigator)) {
+    setBluetoothStatus(false, "Web Serial not supported");
+    if (el("serial-log")) {
+      el("serial-log").textContent =
+        "Open this page in Chrome or Edge to use Bluetooth serial.";
+    }
+    return;
+  }
+  try {
+    serialPort = await navigator.serial.requestPort();
+    await serialPort.open({ baudRate: 9600 });
+    serialKeepReading = true;
+    setBluetoothStatus(true, "Bluetooth connected");
+    readSerialLoop();
+  } catch (e) {
+    serialPort = null;
+    setBluetoothStatus(false, "Not connected");
+  }
+}
+
+async function disconnectBluetoothSerial() {
+  serialKeepReading = false;
+  try {
+    if (serialReader) await serialReader.cancel();
+  } catch (e) {}
+  try {
+    if (serialPort) await serialPort.close();
+  } catch (e) {}
+  serialPort = null;
+  serialReader = null;
+  setBluetoothStatus(false, "Bluetooth off");
 }
 
 async function initRobot() {
@@ -337,43 +540,62 @@ async function initRobot() {
     }
   });
 
+  el("video-reconnect")?.addEventListener("click", () => {
+    const stream = _videoStreams["video-feed"];
+    if (stream) stream.reconnect();
+  });
+
   try {
     const robot = (await getJSON("/api/robot/status")).robot;
     const input = el("video-url-input");
     if (input) input.value = robot.video_url || "";
+    setVideo("video-feed", "video-placeholder", robot.video_url);
   } catch (e) {
     setConn(false);
   }
 
-  // Demo helper: toggle the single checkpoint sensor by hand.
-  el("sim-btn")?.addEventListener("click", async () => {
-    const current = await getJSON("/api/checkpoint/status");
-    await postJSON("/api/checkpoint/status", { detected: !current.detected });
+  // Bluetooth serial: mark the checkpoint when the module sends STOP at 9600 baud.
+  el("bt-btn")?.addEventListener("click", () => {
+    if (serialPort) disconnectBluetoothSerial();
+    else connectBluetoothSerial();
   });
+  if ("serial" in navigator) {
+    navigator.serial.addEventListener("disconnect", () => {
+      if (serialPort) disconnectBluetoothSerial();
+    });
+  }
 
-  registerPoll(async () => {
-    const robot = (await getJSON("/api/robot/status")).robot;
-    el("robot-state").innerHTML = stateBadge(robot.state);
-    setVideo("video-feed", "video-placeholder", robot.video_url);
+  // Starting UI state.
+  if (el("cp-badge")) el("cp-badge").innerHTML = badge("Waiting for car", "muted");
+  if (el("robot-state")) el("robot-state").innerHTML = stateBadge("idle");
+  if (el("robot-cp")) el("robot-cp").textContent = "None";
+  setBluetoothStatus(false, "Bluetooth off");
 
-    const cp = await getJSON("/api/checkpoint/status");
-    const name = cp.checkpoint ? cp.checkpoint.name : "Checkpoint";
-    el("robot-cp").textContent = cp.detected ? name : "None";
-    if (el("cp-badge")) {
-      el("cp-badge").innerHTML = cp.detected
-        ? badge("Checkpoint detected", "warn")
-        : badge("Waiting for car", "muted");
+  // Test without hardware: run simulateSerial("STOP") in the browser console,
+  // or open /robot?test=1 to get on-page Test STOP and Test GO buttons.
+  window.simulateSerial = (msg) => handleSerialMessage(msg || "STOP");
+  if (new URLSearchParams(location.search).has("test")) {
+    const host = el("bt-btn")?.parentElement;
+    if (host) {
+      const makeTestButton = (label, message, className) => {
+        const button = document.createElement("button");
+        button.textContent = label;
+        button.className = className;
+        button.addEventListener("click", () => handleSerialMessage(message));
+        host.appendChild(button);
+      };
+      makeTestButton(
+        "Test STOP",
+        "STOP",
+        "rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+      );
+      makeTestButton(
+        "Test GO",
+        "GO",
+        "rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+      );
     }
-    if (el("sim-btn")) {
-      el("sim-btn").textContent = cp.detected ? "Clear checkpoint" : "Simulate checkpoint";
-    }
-
-    // Rising edge: the car just arrived, so read the exhibit aloud.
-    if (cp.detected && !lastDetected) {
-      speakTourScript();
-    }
-    lastDetected = cp.detected;
-  }, 2000);
+  }
 }
 
 // ---------- page: checkpoints ----------
